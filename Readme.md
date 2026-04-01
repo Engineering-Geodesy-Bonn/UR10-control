@@ -35,17 +35,11 @@ docker run -it --rm \
   ur10_basler bash
 ```
 
-### 3. Launch the ROS Nodes (Inside the Container)
-Inside the container, your ROS workspace is already sourced. Launch the Basler camera driver and RViz visualization (this will open the RViz GUI):
+### 3. Launch the Integrated Environment (Inside the Container)
+Inside the container, your ROS workspace is already sourced. Launch the combined environment which brings up the UR10 arm, the Basler camera, the trigger service, and a unified fullscreen RViz visualization entirely automatically:
 
 ```bash
-roslaunch pylon_trigger camera_with_trigger_rviz.launch &
-```
-
-Then, launch the UR10 driver (replace `10.1.1.2` with your actual robot IP):
-
-```bash
-roslaunch ur_modern_driver ur10_bringup.launch robot_ip:=10.1.1.2 
+roslaunch ur_modern_driver ur10_camera_bringup.launch robot_ip:=10.1.1.2 
 ```
 
 ### 4. Trigger an Image Capture

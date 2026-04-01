@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<launch>
+  <arg name="robot_model" default="ur10" doc="Supported values: ur3, ur5, ur10"/>
+  <arg name="robot_ip" default="10.1.1.2"/>
+  <arg name="limited" default="false"/>
+  <arg name="start_rviz" default="true"/>
+  
+  <!-- RViz configuration that has both the arm and the camera -->
+  <arg name="rviz_config" default="$(find ur_modern_driver)/config/ur_camera_visualization.rviz"/>
+
+  <!-- Bringup UR arm -->
+  <include file="$(find ur_modern_driver)/launch/ur_bringup_rviz.launch">
+    <arg name="robot_model" value="$(arg robot_model)"/>
+    <arg name="robot_ip" value="$(arg robot_ip)"/>
+    <arg name="limited" value="$(arg limited)"/>
+    <arg name="start_rviz" value="$(arg start_rviz)"/>
+    <arg name="rviz_config" value="$(arg rviz_config)"/>
+  </include>
+
+  <!-- Bringup the Basler camera -->
+  <include file="$(find pylon_camera)/launch/pylon_camera_node.launch">
+    <arg name="config_file" value="$(find pylon_trigger)/config/camera.yaml" />
+  </include>
+
+  <!-- Start the camera trigger node -->
+  <node name="camera_trigger_node" pkg="pylon_trigger" type="trigger_camera.py" output="screen" />
+</launch>

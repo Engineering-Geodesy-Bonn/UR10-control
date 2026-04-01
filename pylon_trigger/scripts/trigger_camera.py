@@ -36,9 +36,24 @@ def handle_trigger(req):
         # Save to host home directory
         try:
             cv_img = bridge.imgmsg_to_cv2(img_msg, desired_encoding="bgr8")
-            host_home = os.environ.get('HOST_HOME', '/root')
-            save_path = os.path.join(host_home, 'basler_image.png')
+            
+            save_path_param = rospy.get_param('/trigger_camera/save_path', '')
+            if not save_path_param:
+                host_home = os.environ.get('HOST_HOME', '/root')
+                save_path = os.path.join(host_home, 'basler_image.png')
+            else:
+                save_path = save_path_param
+                # Ensure the directory exists
+                save_dir = os.path.dirname(save_path)
+                if not os.path.exists(save_dir) and save_dir != "":
+                    os.makedirs(save_dir)
+                    
             cv2.imwrite(save_path, cv_img)
+            
+            # Reset the param so manual calls don't overwrite the same file repeatedly
+            if save_path_param:
+                rospy.set_param('/trigger_camera/save_path', '')
+                
             rospy.loginfo("Image successfully saved as .png to: " + save_path)
             return TriggerResponse(success=True, message="Image grabbed and saved to " + save_path)
         except CvBridgeError as e:
@@ -51,7 +66,7 @@ def handle_trigger(req):
 def trigger_server():
     global pub, client
     rospy.init_node('camera_trigger_node')
-    pub = rospy.Publisher('/camera_trigger/image_raw', Image, queue_size=1)
+    pub = rospy.Publisher('/camera_trigger/image_raw', Image, queue_size=1, latch=True)
     
     rospy.loginfo("Waiting for GrabImages action server '/pylon_camera_node/grab_images_raw'...")
     client = actionlib.SimpleActionClient('/pylon_camera_node/grab_images_raw', GrabImagesAction)

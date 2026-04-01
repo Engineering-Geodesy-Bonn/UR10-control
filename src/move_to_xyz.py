@@ -7,7 +7,9 @@ import os
 import csv
 import rospkg
 import sys
+import datetime
 from std_msgs.msg import String
+from std_srvs.srv import Trigger
 
 if sys.version_info[0] < 3:
     input_func = raw_input
@@ -60,6 +62,17 @@ class URController:
             return trans
         except (tf.Exception, tf.LookupException, tf.ConnectivityException):
             return None
+
+    def get_current_pose_full(self):
+        """ Fetch the full current tool tip pose (trans, rot) from tf listener. """
+        import tf
+        listener = tf.TransformListener()
+        try:
+            listener.waitForTransform('/base', '/tool0_controller', rospy.Time(0), rospy.Duration(1.0))
+            (trans, rot) = listener.lookupTransform('/base', '/tool0_controller', rospy.Time(0))
+            return trans, rot
+        except (tf.Exception, tf.LookupException, tf.ConnectivityException):
+            return None, None
 
     def ur_axis_angle_to_quat(self, rx, ry, rz):
         theta = math.sqrt(rx**2 + ry**2 + rz**2)
@@ -281,6 +294,22 @@ def main():
 
     ur_control = URController()
     
+    # Create the run folder mapped to /home/felix/Pictures/UR10arm on host
+    host_home = os.environ.get('HOST_HOME', '/root')
+    pictures_dir = os.path.join(host_home, 'Pictures', 'UR10arm')
+    now = datetime.datetime.utcnow()
+    # Format: YYYY-MM-DD_HH-MM-SS
+    run_folder_name = now.strftime("%Y-%m-%d_%H-%M-%S")
+    run_dir = os.path.join(pictures_dir, run_folder_name)
+    if not os.path.exists(run_dir):
+        os.makedirs(run_dir)
+        
+    csv_out_path = os.path.join(run_dir, "poses.csv")
+    csv_file = open(csv_out_path, 'w')
+    csv_writer = csv.writer(csv_file)
+    # Header
+    csv_writer.writerow(['filename', 'x_mm', 'y_mm', 'z_mm', 'rx_rad', 'ry_rad', 'rz_rad', 'qx', 'qy', 'qz', 'qw'])
+
     # Publish markers (white spheres and optional dome)
     ur_control.publish_markers(targets, dome_params)
 
@@ -298,7 +327,50 @@ def main():
         success = ur_control.move_and_wait(t['x'], t['y'], t['z'], t['rx'], t['ry'], t['rz'], t['a'], t['v'], is_first_point=is_first)
         
         if not rospy.is_shutdown():
-            input_func(">>> Press [ENTER] to move to the next position...")
+            rospy.loginfo("Reached position. Waiting 1 second before triggering camera...")
+            rospy.sleep(1.0)
+            
+            # Format time HH:MM:SS.sss
+            now_trigger = datetime.datetime.utcnow()
+            img_filename = now_trigger.strftime("%H:%M:%S.%f")[:-3] + ".png"
+            img_save_path = os.path.join(run_dir, img_filename)
+            
+            # Tell trigger camera node where to save the image
+            rospy.set_param('/trigger_camera/save_path', img_save_path)
+            
+            try:
+                rospy.wait_for_service('/trigger_camera', timeout=2.0)
+                trigger_service = rospy.ServiceProxy('/trigger_camera', Trigger)
+                resp = trigger_service()
+                
+                if resp.success:
+                    rospy.loginfo("Camera triggered successfully. Image: " + img_filename)
+                    # Grab true current pose for CSV
+                    trans, rot = ur_control.get_current_pose_full()
+                    if trans and rot:
+                        x_mm, y_mm, z_mm = trans[0]*1000.0, trans[1]*1000.0, trans[2]*1000.0
+                        qx, qy, qz, qw = rot[0], rot[1], rot[2], rot[3]
+                        import tf.transformations as tf_trans
+                        rx, ry, rz = tf_trans.euler_from_quaternion([qx, qy, qz, qw])
+                        # Write row (translation mm, angles 9 decimal places rad)
+                        csv_writer.writerow([
+                            img_filename, 
+                            "%.3f" % x_mm, "%.3f" % y_mm, "%.3f" % z_mm,
+                            "%.9f" % rx, "%.9f" % ry, "%.9f" % rz,
+                            "%.9f" % qx, "%.9f" % qy, "%.9f" % qz, "%.9f" % qw
+                        ])
+                        csv_file.flush()
+                else:
+                    rospy.logwarn("Failed to trigger camera: " + resp.message)
+            except rospy.ServiceException as e:
+                rospy.logerr("Service call failed: %s" % e)
+            except rospy.ROSException:
+                rospy.logerr("Service /trigger_camera not available.")
+            
+            rospy.loginfo("Waiting 1 second before continuing...")
+            rospy.sleep(1.0)
+            
+    csv_file.close()
 
 if __name__ == '__main__':
     try:

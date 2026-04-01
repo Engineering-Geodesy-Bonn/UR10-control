@@ -129,6 +129,10 @@ RUN source /opt/ros/${ROS_DISTRO}/setup.bash && \
 RUN source /opt/ros/${ROS_DISTRO}/setup.bash && \
     source ${CATKIN_WS}/devel/setup.bash && \
     rospack find ur_modern_driver
+COPY launch /catkin_ws/src/ur_modern_driver/launch/
+COPY config /catkin_ws/src/ur_modern_driver/config/
+COPY src/*.py /catkin_ws/src/ur_modern_driver/src/
+COPY *.csv /catkin_ws/src/ur_modern_driver/
 
 RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> /root/.bashrc && \
     echo "source ${CATKIN_WS}/devel/setup.bash" >> /root/.bashrc
