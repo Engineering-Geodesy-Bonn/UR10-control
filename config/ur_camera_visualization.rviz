@@ -149,6 +149,8 @@ Visualization Manager:
           Value: true
         tool0_controller:
           Value: true
+        camera:
+          Value: true
         upper_arm_link:
           Value: true
         world:

@@ -30,12 +30,14 @@ MAX_Z = 1.200   # arbitrary maximum height
 
 class URController:
     def __init__(self):
+        import tf
+        self.listener = tf.TransformListener()
         self.pose_pub = rospy.Publisher('/target_poses', PoseArray, queue_size=10, latch=True)
         self.marker_pub = rospy.Publisher('/target_markers', MarkerArray, queue_size=10, latch=True)
         self.pub = rospy.Publisher('/ur_driver/URScript', String, queue_size=10)
         self.current_tcp = None
         self.subscriber = rospy.Subscriber('/tool_data', ToolDataMsg, self.tool_data_callback)
-        rospy.sleep(0.5)
+        rospy.sleep(1.0) # give tf listener time to buffer
 
     def tool_data_callback(self, msg):
         self.current_tcp = msg
@@ -55,21 +57,17 @@ class URController:
     def get_current_pose(self):
         """ Fetch the current tool tip pose from tf listener. """
         import tf
-        listener = tf.TransformListener()
         try:
-            listener.waitForTransform('/base', '/tool0_controller', rospy.Time(0), rospy.Duration(1.0))
-            (trans, rot) = listener.lookupTransform('/base', '/tool0_controller', rospy.Time(0))
+            (trans, rot) = self.listener.lookupTransform('/base', '/tool0_controller', rospy.Time(0))
             return trans
         except (tf.Exception, tf.LookupException, tf.ConnectivityException):
             return None
 
     def get_current_pose_full(self):
-        """ Fetch the full current tool tip pose (trans, rot) from tf listener. """
+        """ Fetch the full current camera pose (trans, rot) from tf listener. """
         import tf
-        listener = tf.TransformListener()
         try:
-            listener.waitForTransform('/base', '/tool0_controller', rospy.Time(0), rospy.Duration(1.0))
-            (trans, rot) = listener.lookupTransform('/base', '/tool0_controller', rospy.Time(0))
+            (trans, rot) = self.listener.lookupTransform('/base', '/camera', rospy.Time(0))
             return trans, rot
         except (tf.Exception, tf.LookupException, tf.ConnectivityException):
             return None, None
