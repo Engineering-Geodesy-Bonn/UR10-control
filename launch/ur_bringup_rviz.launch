@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<!--
+  Bring up the selected UR robot and open RViz with a preconfigured view.
+
+  Usage:
+    roslaunch ur_modern_driver ur_bringup_rviz.launch robot_model:=ur10 robot_ip:=10.1.1.2
+-->
+<launch>
+  <arg name="robot_model" default="ur10" doc="Supported values: ur3, ur5, ur10"/>
+  <arg name="robot_ip"/>
+  <arg name="limited" default="false"/>
+  <arg name="start_rviz" default="true"/>
+  <arg name="rviz_config" default="$(find ur_modern_driver)/config/ur_visualization.rviz"/>
+
+  <!-- Table markers -->
+  <node name="table_marker_publisher" pkg="ur_modern_driver" type="table_marker_publisher.py" output="screen" />
+
+  <group if="$(eval arg('robot_model') == 'ur3')">
+    <include file="$(find ur_modern_driver)/launch/ur3_bringup.launch">
+      <arg name="robot_ip" value="$(arg robot_ip)"/>
+      <arg name="limited" value="$(arg limited)"/>
+    </include>
+  </group>
+
+  <group if="$(eval arg('robot_model') == 'ur5')">
+    <include file="$(find ur_modern_driver)/launch/ur5_bringup.launch">
+      <arg name="robot_ip" value="$(arg robot_ip)"/>
+      <arg name="limited" value="$(arg limited)"/>
+    </include>
+  </group>
+
+  <group if="$(eval arg('robot_model') == 'ur10')">
+    <include file="$(find ur_modern_driver)/launch/ur10_bringup.launch">
+      <arg name="robot_ip" value="$(arg robot_ip)"/>
+      <arg name="limited" value="$(arg limited)"/>
+    </include>
+  </group>
+
+  <node if="$(arg start_rviz)" pkg="rviz" type="rviz" name="rviz"
+        args="-d $(arg rviz_config)" output="screen"/>
+</launch>

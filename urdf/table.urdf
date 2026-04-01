@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<robot name="table">
+  <link name="base"/>
+
+  <joint name="table_top_joint" type="fixed">
+    <parent link="base"/>
+    <child link="table_top"/>
+    <origin xyz="0.0225 0.4175 -0.0125" rpy="0 0 0"/>
+  </joint>
+
+  <link name="table_top">
+    <visual>
+      <geometry>
+        <box size="0.805 1.205 0.025"/>
+      </geometry>
+      <material name="table_grey">
+        <color rgba="0.4 0.4 0.4 1.0"/>
+      </material>
+    </visual>
+  </link>
+</robot>
