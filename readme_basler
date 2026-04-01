@@ -1,0 +1,5 @@
+# Build docker image
+docker build -t pylonmipi -f Dockerfile.basler .
+
+# Run the container and start the pylon viewer
+docker run -it --rm --privileged -v /dev/bus/usb:/dev/bus/usb -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix pylonmipi /opt/pylon/bin/pylonviewer

@@ -1,0 +1,15 @@
+FROM osrf/ros:melodic-desktop-full
+COPY pylon-26.03.1_linux-x86_64_debs.tar.gz /root/
+RUN cd /root && tar -xzf pylon-26.03.1_linux-x86_64_debs.tar.gz && \
+    dpkg -i pylon_*.deb codemeter*.deb || apt-get install -f -y && \
+    rm -rf /root/pylon* /root/codemeter*
+
+ENV PYLON_ROOT=/opt/pylon
+ENV CPATH=/opt/pylon/include
+
+WORKDIR /catkin_ws/src
+RUN apt-get update && apt-get install -y git python-catkin-tools python-rosdep
+RUN git clone -b pylon5-legacy https://github.com/basler/pylon-ros-camera.git && \
+    git clone https://github.com/dragandbot/dragandbot_common.git
+COPY patch_findpylon.py /patch_findpylon.py
+RUN python /patch_findpylon.py

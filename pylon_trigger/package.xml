@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>pylon_trigger</name>
+  <version>1.0.0</version>
+  <description>The pylon_trigger package</description>
+  <maintainer email="felix@todo.todo">felix</maintainer>
+  <license>TODO</license>
+  <buildtool_depend>catkin</buildtool_depend>
+  <depend>rospy</depend>
+  <depend>std_srvs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>camera_control_msgs</depend>
+  <depend>actionlib</depend>
+  <depend>cv_bridge</depend>
+</package>

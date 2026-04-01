@@ -134,4 +134,32 @@ RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> /root/.bashrc && \
     echo "source ${CATKIN_WS}/devel/setup.bash" >> /root/.bashrc
 
 ENTRYPOINT ["/ros_entrypoint.sh"]
+
+# Installing Pylon Software
+COPY pylon-26.03.1_linux-x86_64_debs.tar.gz /root/
+RUN cd /root && tar -xzf pylon-26.03.1_linux-x86_64_debs.tar.gz && \
+    apt-get update && \
+    apt-get install -y ./pylon_*.deb ./codemeter*.deb && \
+    rm -rf /root/pylon* /root/codemeter*
+
+ENV PYLON_ROOT=/opt/pylon
+ENV CPATH=/opt/pylon/include
+RUN echo "/opt/pylon/lib" > /etc/ld.so.conf.d/pylon.conf && ldconfig
+
+WORKDIR /catkin_ws/src
+RUN git clone -b pylon5-legacy https://github.com/basler/pylon-ros-camera.git && \
+    git clone https://github.com/dragandbot/dragandbot_common.git
+
+COPY patch_findpylon.py /patch_findpylon.py
+RUN python /patch_findpylon.py $(find /catkin_ws/src -name FindPylon.cmake -o -name CMakeLists.txt)
+
+COPY pylon_trigger /catkin_ws/src/pylon_trigger
+
+WORKDIR /catkin_ws
+RUN source /opt/ros/${ROS_DISTRO}/setup.bash && \
+    rosdep install --from-paths src/pylon-ros-camera src/dragandbot_common src/pylon_trigger --ignore-src -r -y
+
+RUN source /opt/ros/${ROS_DISTRO}/setup.bash && \
+    catkin_make -DCMAKE_BUILD_TYPE=Release
+
 CMD ["bash"]

@@ -1,0 +1,7 @@
+camera_frame: pylon_camera
+device_user_id: ""
+camera_info_url: ""
+image_encoding: "rgb8"
+binning_x: 1
+binning_y: 1
+frame_rate: 5.0

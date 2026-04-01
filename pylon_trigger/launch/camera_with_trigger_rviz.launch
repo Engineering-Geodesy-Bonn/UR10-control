@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<launch>
+    <include file="$(find pylon_camera)/launch/pylon_camera_node.launch">
+        <arg name="config_file" value="$(find pylon_trigger)/config/camera.yaml" />
+    </include>
+    <node name="camera_trigger_node" pkg="pylon_trigger" type="trigger_camera.py" output="screen" />
+    <node name="$(anon rviz)" pkg="rviz" type="rviz" args="-d $(find pylon_trigger)/config/camera_visualization.rviz" output="screen" />
+</launch>

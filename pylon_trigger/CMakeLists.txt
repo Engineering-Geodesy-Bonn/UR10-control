@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 2.8.3)
+project(pylon_trigger)
+find_package(catkin REQUIRED COMPONENTS rospy std_srvs sensor_msgs camera_control_msgs actionlib)
+catkin_package()
+catkin_install_python(PROGRAMS scripts/trigger_camera.py DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
