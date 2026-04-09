@@ -125,7 +125,7 @@ def main():
                         help="Output image file used when no GUI backend is available")
     args = parser.parse_args()
 
-    C = np.array([0.0, 0.7, 0.25])
+    C = np.array([0.0, 0.7, 0.28])
     R = 0.10 # radius of the dome
     offset = args.offset
     
