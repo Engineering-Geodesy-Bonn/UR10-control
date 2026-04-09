@@ -1,7 +1,10 @@
 import os
 
+# Get workspace from env or default to /catkin_ws
+catkin_ws = os.environ.get('CATKIN_WS', '/catkin_ws')
+
 # 1. Provide a robust FindPylon.cmake
-findpylon_path = "/catkin_ws/src/pylon-ros-camera/pylon_camera/cmake/FindPylon.cmake"
+findpylon_path = f"{catkin_ws}/src/pylon-ros-camera/pylon_camera/cmake/FindPylon.cmake"
 new_findpylon = """
 set(_PYLON_CONFIG "/opt/pylon/bin/pylon-config")
 if (EXISTS "${_PYLON_CONFIG}")
@@ -26,7 +29,7 @@ with open(findpylon_path, "w") as f:
     f.write(new_findpylon)
 
 # 2. Force pylon_camera to use our FindPylon.cmake instead of the official pylon config if any
-cmakelists_path = "/catkin_ws/src/pylon-ros-camera/pylon_camera/CMakeLists.txt"
+cmakelists_path = f"{catkin_ws}/src/pylon-ros-camera/pylon_camera/CMakeLists.txt"
 with open(cmakelists_path, "r") as f:
     cmakelists = f.read()
 

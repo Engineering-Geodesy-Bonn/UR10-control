@@ -463,7 +463,7 @@ def main():
     ur_control = URController()
     
     # Create the run folder mapped to /home/felix/Pictures/UR10arm on host
-    host_home = os.environ.get('HOST_HOME', '/root')
+    host_home = os.environ.get('HOST_HOME', os.path.expanduser('~'))
     pictures_dir = os.path.join(host_home, 'Pictures', 'UR10arm')
     now = datetime.datetime.utcnow()
     # Format: YYYY-MM-DD_HH-MM-SS

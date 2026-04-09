@@ -11,10 +11,11 @@ import argparse
 import numpy as np
 
 
-def plot_dome_and_poses(center, radius, poses, triad_scale=0.03, plot_file="dome_poses_plot.png"):
+def plot_dome_and_poses(center, radius, poses, triad_scale=0.02, plot_file="dome_poses_plot.png"):
     try:
         import matplotlib
         import matplotlib.pyplot as plt
+        from mpl_toolkits.mplot3d import Axes3D
     except ImportError:
         print("[WARN] matplotlib not installed. Skipping 3D plot.")
         return
@@ -48,7 +49,10 @@ def plot_dome_and_poses(center, radius, poses, triad_scale=0.03, plot_file="dome
     ax.set_xlabel('X [m]')
     ax.set_ylabel('Y [m]')
     ax.set_zlabel('Z [m]')
-    ax.set_box_aspect((1, 1, 1))
+    try:
+        ax.set_box_aspect((1, 1, 1))
+    except AttributeError:
+        pass
     ax.legend()
     plt.tight_layout()
 
@@ -109,7 +113,7 @@ def quat2axisangle(x, y, z, w):
 
 def main():
     parser = argparse.ArgumentParser(description="Generate dome poses with orthogonal offset from sphere surface")
-    parser.add_argument("--offset", type=float, default=0.0,
+    parser.add_argument("--offset", type=float, default=0.08,
                         help="Orthogonal offset from sphere surface in meters (positive = outside, negative = inside)")
     parser.add_argument("--azimuth-step-deg", type=float, default=None,
                         help="Azimuth step in degrees for each latitude ring (overrides default ring resolution)")
@@ -121,7 +125,7 @@ def main():
                         help="Output image file used when no GUI backend is available")
     args = parser.parse_args()
 
-    C = np.array([0.0, 0.7, 0.20])
+    C = np.array([0.0, 0.7, 0.25])
     R = 0.10 # radius of the dome
     offset = args.offset
     
