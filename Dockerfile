@@ -4,7 +4,12 @@ SHELL ["/bin/bash", "-lc"]
 ENV DEBIAN_FRONTEND=noninteractive
 ENV ROS_DISTRO=melodic
 ENV CATKIN_WS=/catkin_ws
+ENV PYLON_ROOT=/opt/pylon
+ENV CPATH=/opt/pylon/include
 
+# ==============================================================================
+# Stage 1: System Dependencies & Base Setup (rarely changes)
+# ==============================================================================
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     build-essential \
@@ -28,11 +33,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN if [ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]; then rosdep init; fi && \
     rosdep update
 
+# ==============================================================================
+# Stage 2: Clone Git Repositories (rarely changes)
+# ==============================================================================
 RUN mkdir -p ${CATKIN_WS}/src
 WORKDIR ${CATKIN_WS}/src
 RUN git clone --depth 1 --branch master https://github.com/ros-industrial-attic/ur_modern_driver.git && \
-    git clone --depth 1 --branch kinetic-devel https://github.com/ros-industrial/universal_robot.git
+    git clone --depth 1 --branch kinetic-devel https://github.com/ros-industrial/universal_robot.git && \
+    git clone -b pylon5-legacy https://github.com/basler/pylon-ros-camera.git && \
+    git clone https://github.com/dragandbot/dragandbot_common.git
 
+# ==============================================================================
+# Stage 3: Setup & Patches (rarely changes)
+# ==============================================================================
 # Keep only ur_description + ur_msgs from universal_robot (ignore moveit/kinematics/etc)
 RUN find ${CATKIN_WS}/src/universal_robot -mindepth 1 -maxdepth 1 -type d \
     ! -name ur_description ! -name ur_msgs \
@@ -50,7 +63,9 @@ RUN if [ ! -f ${CATKIN_WS}/src/universal_robot/ur_description/launch/ur10_upload
       > ${CATKIN_WS}/src/universal_robot/ur_description/launch/ur10_upload.launch; \
     fi
 
-# Compatibility patches
+# ==============================================================================
+# Stage 4: Apply Compatibility Patches (rarely changes)
+# ==============================================================================
 RUN python - <<'PY'
 import io, os, re
 
@@ -119,6 +134,9 @@ print("Patched:", p1)
 print("Patched:", p2, "using field:", field)
 PY
 
+# ==============================================================================
+# Stage 5: Install UR Dependencies & Build UR Packages (rarely changes)
+# ==============================================================================
 WORKDIR ${CATKIN_WS}
 RUN source /opt/ros/${ROS_DISTRO}/setup.bash && \
     rosdep install --rosdistro=${ROS_DISTRO} --from-paths src/ur_modern_driver src/universal_robot/ur_description src/universal_robot/ur_msgs --ignore-src -r -y
@@ -126,44 +144,60 @@ RUN source /opt/ros/${ROS_DISTRO}/setup.bash && \
 RUN source /opt/ros/${ROS_DISTRO}/setup.bash && \
     catkin_make -DCMAKE_BUILD_TYPE=Release --pkg ur_modern_driver ur_description ur_msgs
 
-RUN source /opt/ros/${ROS_DISTRO}/setup.bash && \
-    source ${CATKIN_WS}/devel/setup.bash && \
-    rospack find ur_modern_driver
-COPY launch /catkin_ws/src/ur_modern_driver/launch/
-COPY config /catkin_ws/src/ur_modern_driver/config/
-COPY src/*.py /catkin_ws/src/ur_modern_driver/src/
-COPY *.csv /catkin_ws/src/ur_modern_driver/
-
-RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> /root/.bashrc && \
-    echo "source ${CATKIN_WS}/devel/setup.bash" >> /root/.bashrc
-
-ENTRYPOINT ["/ros_entrypoint.sh"]
-
-# Installing Pylon Software
+# ==============================================================================
+# Stage 6: Install Pylon Software (rarely changes)
+# ==============================================================================
 COPY pylon-26.03.1_linux-x86_64_debs.tar.gz /root/
 RUN cd /root && tar -xzf pylon-26.03.1_linux-x86_64_debs.tar.gz && \
     apt-get update && \
     apt-get install -y ./pylon_*.deb ./codemeter*.deb && \
     rm -rf /root/pylon* /root/codemeter*
 
-ENV PYLON_ROOT=/opt/pylon
-ENV CPATH=/opt/pylon/include
 RUN echo "/opt/pylon/lib" > /etc/ld.so.conf.d/pylon.conf && ldconfig
 
-WORKDIR /catkin_ws/src
-RUN git clone -b pylon5-legacy https://github.com/basler/pylon-ros-camera.git && \
-    git clone https://github.com/dragandbot/dragandbot_common.git
-
+# ==============================================================================
+# Stage 7: Install Pylon Dependencies & Patch (rarely changes)
+# ==============================================================================
 COPY patch_findpylon.py /patch_findpylon.py
 RUN python /patch_findpylon.py $(find /catkin_ws/src -name FindPylon.cmake -o -name CMakeLists.txt)
 
+WORKDIR ${CATKIN_WS}
+RUN source /opt/ros/${ROS_DISTRO}/setup.bash && \
+    rosdep install --from-paths src/pylon-ros-camera src/dragandbot_common --ignore-src -r -y
+
+# ==============================================================================
+# Stage 8: Copy Pylon Trigger Package (semi-frequently changes)
+# ==============================================================================
 COPY pylon_trigger /catkin_ws/src/pylon_trigger
 
-WORKDIR /catkin_ws
 RUN source /opt/ros/${ROS_DISTRO}/setup.bash && \
-    rosdep install --from-paths src/pylon-ros-camera src/dragandbot_common src/pylon_trigger --ignore-src -r -y
+    rosdep install --from-paths src/pylon_trigger --ignore-src -r -y
 
+# ==============================================================================
+# Stage 9: Copy Configuration & Data Files (semi-frequently changes)
+# ==============================================================================
+COPY config /catkin_ws/src/ur_modern_driver/config/
+COPY launch /catkin_ws/src/ur_modern_driver/launch/
+COPY *.csv /catkin_ws/src/ur_modern_driver/
+
+# ==============================================================================
+# Stage 10: Copy Python Scripts (frequently changes)
+# ==============================================================================
+COPY src/*.py /catkin_ws/src/ur_modern_driver/src/
+
+# ==============================================================================
+# Stage 11: Final Build & Environment Setup
+# ==============================================================================
+WORKDIR ${CATKIN_WS}
 RUN source /opt/ros/${ROS_DISTRO}/setup.bash && \
     catkin_make -DCMAKE_BUILD_TYPE=Release
 
+RUN source /opt/ros/${ROS_DISTRO}/setup.bash && \
+    source ${CATKIN_WS}/devel/setup.bash && \
+    rospack find ur_modern_driver
+
+RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> /root/.bashrc && \
+    echo "source ${CATKIN_WS}/devel/setup.bash" >> /root/.bashrc
+
+ENTRYPOINT ["/ros_entrypoint.sh"]
 CMD ["bash"]

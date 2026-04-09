@@ -35,6 +35,7 @@ xhost +local:docker
 Start the container. This grants host networking (required for the UR10 ethernet connection), USB access (for the Basler Camera), and maps your Home folder to save the captured images:
 ```bash
 docker run -it --rm \
+  --name fancy-arm \
   --network host \
   --privileged \
   -v /dev/bus/usb:/dev/bus/usb \
@@ -86,6 +87,15 @@ The following custom Python executables define the logic and routines for captur
 ---
 
 ## 🕹️ Typical Operations Workflow
+
+
+### 0. Access Docker Container
+
+```bash
+docker ps # list docker containers
+docker exec -it fancy-arm bash # access a docker container
+docker kill fancy-arm bash # stop a docker container
+```
 
 ### 1. Unified Launch
 Connect the 10.1.1.2 Ethernet socket and launch:

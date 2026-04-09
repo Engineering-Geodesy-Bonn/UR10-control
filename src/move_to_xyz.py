@@ -55,19 +55,15 @@ class URController:
         return True
 
     def get_current_pose(self):
-        """ Fetch the current tool tip pose from tf listener. """
-        import tf
-        try:
-            (trans, rot) = self.listener.lookupTransform('/base', '/tool0_controller', rospy.Time(0))
-            return trans
-        except (tf.Exception, tf.LookupException, tf.ConnectivityException):
-            return None
+        """Fetch the current tool tip position from tf listener."""
+        trans, _ = self.get_current_pose_full('/tool0_controller')
+        return trans
 
-    def get_current_pose_full(self):
-        """ Fetch the full current camera pose (trans, rot) from tf listener. """
+    def get_current_pose_full(self, frame='/camera'):
+        """Fetch current pose (trans, rot) for a frame in base coordinates."""
         import tf
         try:
-            (trans, rot) = self.listener.lookupTransform('/base', '/camera', rospy.Time(0))
+            (trans, rot) = self.listener.lookupTransform('/base', frame, rospy.Time(0))
             return trans, rot
         except (tf.Exception, tf.LookupException, tf.ConnectivityException):
             return None, None
@@ -82,6 +78,123 @@ class URController:
         z = (rz / theta) * s
         w = math.cos(theta / 2.0)
         return (x, y, z, w)
+
+    def quat_to_ur_axis_angle(self, qx, qy, qz, qw):
+        """ Convert quaternion to UR axis-angle representation (rx, ry, rz). """
+        # Clamp w to [-1, 1] to handle numerical errors
+        qw = max(-1.0, min(1.0, qw))
+        theta = 2.0 * math.acos(qw)
+        
+        # Avoid division by zero
+        sin_half_theta = math.sin(theta / 2.0)
+        if abs(sin_half_theta) < 1e-6:
+            return (0.0, 0.0, 0.0)
+        
+        rx = qx / sin_half_theta * theta
+        ry = qy / sin_half_theta * theta
+        rz = qz / sin_half_theta * theta
+        return (rx, ry, rz)
+
+    def rotation_distance(self, rx1, ry1, rz1, rx2, ry2, rz2):
+        """
+        Calculate shortest angular distance between two orientations.
+        Input rotations are UR axis-angle vectors; output is radians in [0, pi].
+        """
+        q1x, q1y, q1z, q1w = self.ur_axis_angle_to_quat(rx1, ry1, rz1)
+        q2x, q2y, q2z, q2w = self.ur_axis_angle_to_quat(rx2, ry2, rz2)
+
+        dot = q1x * q2x + q1y * q2y + q1z * q2z + q1w * q2w
+        dot = abs(dot)  # q and -q represent the same orientation
+        dot = max(-1.0, min(1.0, dot))
+        return 2.0 * math.acos(dot)
+
+    def compute_pose_errors(self, x, y, z, rx, ry, rz, frame='/tool0_controller'):
+        """Compute translation and shortest-path rotation error to target pose."""
+        trans, rot = self.get_current_pose_full(frame)
+        if not trans or not rot:
+            return None
+
+        target_x, target_y, target_z = x, y, z
+        target_rx, target_ry, target_rz = rx, ry, rz
+
+        # If camera-frame error is requested, convert commanded tool target pose
+        # into expected camera target pose using the TF tree extrinsic only.
+        if frame == '/camera':
+            import tf
+            import tf.transformations as tf_trans
+            try:
+                t_tc, q_tc = self.listener.lookupTransform('/tool0_controller', '/camera', rospy.Time(0))
+
+                q_bt = self.ur_axis_angle_to_quat(rx, ry, rz)
+                t_bt = tf_trans.quaternion_matrix(q_bt)
+                t_bt[0, 3] = x
+                t_bt[1, 3] = y
+                t_bt[2, 3] = z
+
+                t_tc_m = tf_trans.quaternion_matrix(q_tc)
+                t_tc_m[0, 3] = t_tc[0]
+                t_tc_m[1, 3] = t_tc[1]
+                t_tc_m[2, 3] = t_tc[2]
+
+                t_bc = tf_trans.concatenate_matrices(t_bt, t_tc_m)
+                target_x = t_bc[0, 3]
+                target_y = t_bc[1, 3]
+                target_z = t_bc[2, 3]
+
+                q_bc = tf_trans.quaternion_from_matrix(t_bc)
+                target_rx, target_ry, target_rz = self.quat_to_ur_axis_angle(q_bc[0], q_bc[1], q_bc[2], q_bc[3])
+            except (tf.Exception, tf.LookupException, tf.ConnectivityException):
+                return None
+
+        dx = trans[0] - target_x
+        dy = trans[1] - target_y
+        dz = trans[2] - target_z
+        trans_error = math.sqrt(dx**2 + dy**2 + dz**2)
+
+        qx, qy, qz, qw = rot[0], rot[1], rot[2], rot[3]
+        current_rx, current_ry, current_rz = self.quat_to_ur_axis_angle(qx, qy, qz, qw)
+        rot_error = self.rotation_distance(current_rx, current_ry, current_rz, target_rx, target_ry, target_rz)
+
+        return trans_error, rot_error, dx, dy, dz
+
+    def convert_target_to_tool_pose(self, x, y, z, rx, ry, rz, target_frame='/tool0_controller'):
+        """Convert a target pose from target_frame into /tool0_controller pose in /base."""
+        if target_frame == '/tool0_controller':
+            return x, y, z, rx, ry, rz
+
+        if target_frame != '/camera':
+            rospy.logerr("Unsupported target frame: {}. Use /tool0_controller or /camera".format(target_frame))
+            return None
+
+        import tf
+        import tf.transformations as tf_trans
+        try:
+            # Known extrinsic from tool to camera from TF tree.
+            t_tc, q_tc = self.listener.lookupTransform('/tool0_controller', '/camera', rospy.Time(0))
+
+            # Build target transform T_base_target (here: T_base_camera)
+            q_bt = self.ur_axis_angle_to_quat(rx, ry, rz)
+            t_bt = tf_trans.quaternion_matrix(q_bt)
+            t_bt[0, 3] = x
+            t_bt[1, 3] = y
+            t_bt[2, 3] = z
+
+            # Build T_tool_camera and invert it to get T_camera_tool
+            t_tc_m = tf_trans.quaternion_matrix(q_tc)
+            t_tc_m[0, 3] = t_tc[0]
+            t_tc_m[1, 3] = t_tc[1]
+            t_tc_m[2, 3] = t_tc[2]
+            t_ct_m = tf_trans.inverse_matrix(t_tc_m)
+
+            # T_base_tool = T_base_camera * T_camera_tool
+            t_btool = tf_trans.concatenate_matrices(t_bt, t_ct_m)
+            q_btool = tf_trans.quaternion_from_matrix(t_btool)
+            rx_tool, ry_tool, rz_tool = self.quat_to_ur_axis_angle(q_btool[0], q_btool[1], q_btool[2], q_btool[3])
+
+            return t_btool[0, 3], t_btool[1, 3], t_btool[2, 3], rx_tool, ry_tool, rz_tool
+        except (tf.Exception, tf.LookupException, tf.ConnectivityException) as e:
+            rospy.logerr("Failed to convert target pose from {} to /tool0_controller: {}".format(target_frame, e))
+            return None
 
     def publish_poses(self, targets):
         pose_array = PoseArray()
@@ -170,9 +283,9 @@ class URController:
             
         self.marker_pub.publish(marker_array)
 
-    def move_and_wait(self, x, y, z, rx, ry, rz, a, v, is_first_point=False):
+    def move_and_wait(self, x, y, z, rx, ry, rz, a, v, is_first_point=False, wait_timeout=60.0):
         if not self.check_bounds(x, y, z):
-            return False
+            return False, None
 
         # Send URScript command. 
         # Wir hatten anfangs "movej" fuer ALLES verwendet. Das war das Setup,
@@ -188,33 +301,74 @@ class URController:
 
         # Wait for the motion to complete by tracking TCP pose
         rospy.loginfo("Waiting for arm to reach target...")
-        timeout = rospy.Time.now() + rospy.Duration(15.0)  # max wait 15 seconds
+        timeout = rospy.Time.now() + rospy.Duration(wait_timeout)
         success = False
-        target_tolerance = 0.005 # 5mm tolerance
+        translation_tolerance = 0.005  # 5mm tolerance for translation
+        rotation_tolerance = math.radians(1.0)  # 1 degree tolerance for rotation (in radians)
+        trans_error = None
+        rot_error = None
+        dx_error = None
+        dy_error = None
+        dz_error = None
 
         # Check loop
         rate = rospy.Rate(10) # 10Hz
         while not rospy.is_shutdown() and rospy.Time.now() < timeout:
-            current_pos = self.get_current_pose()
-            if current_pos:
-                dx = current_pos[0] - x
-                dy = current_pos[1] - y
-                dz = current_pos[2] - z
-                dist = math.sqrt(dx**2 + dy**2 + dz**2)
+            trans, rot = self.get_current_pose_full('/tool0_controller')
+            if trans and rot:
+                # Check translation
+                dx = trans[0] - x
+                dy = trans[1] - y
+                dz = trans[2] - z
+                trans_dist = math.sqrt(dx**2 + dy**2 + dz**2)
 
-                if dist < target_tolerance:
+                # Check rotation - convert current quaternion to UR axis-angle format
+                qx, qy, qz, qw = rot[0], rot[1], rot[2], rot[3]
+                current_rx, current_ry, current_rz = self.quat_to_ur_axis_angle(qx, qy, qz, qw)
+                rot_dist = self.rotation_distance(current_rx, current_ry, current_rz, rx, ry, rz)
+
+                if trans_dist < translation_tolerance and rot_dist < rotation_tolerance:
                     # Give it a fraction of a second to settle
                     rospy.sleep(0.5)
-                    # Check again to ensure it really stopped
-                    current_pos_settled = self.get_current_pose()
-                    if current_pos_settled:
-                        dist_settled = math.sqrt((current_pos_settled[0]-x)**2 + (current_pos_settled[1]-y)**2 + (current_pos_settled[2]-z)**2)
-                        if dist_settled < target_tolerance:
+                    # Check again to ensure it really stopped (both translation and rotation)
+                    trans_settled, rot_settled = self.get_current_pose_full('/tool0_controller')
+                    if trans_settled and rot_settled:
+                        dx_settled = trans_settled[0] - x
+                        dy_settled = trans_settled[1] - y
+                        dz_settled = trans_settled[2] - z
+                        trans_dist_settled = math.sqrt(dx_settled**2 + dy_settled**2 + dz_settled**2)
+                        
+                        qx_s, qy_s, qz_s, qw_s = rot_settled[0], rot_settled[1], rot_settled[2], rot_settled[3]
+                        current_rx_s, current_ry_s, current_rz_s = self.quat_to_ur_axis_angle(qx_s, qy_s, qz_s, qw_s)
+                        rot_dist_settled = self.rotation_distance(current_rx_s, current_ry_s, current_rz_s, rx, ry, rz)
+                        
+                        if trans_dist_settled < translation_tolerance and rot_dist_settled < rotation_tolerance:
                             success = True
+                            trans_error = trans_dist_settled
+                            rot_error = rot_dist_settled
+                            dx_error = dx_settled
+                            dy_error = dy_settled
+                            dz_error = dz_settled
+                            rospy.loginfo("Target reached! Translation error: {:.6f}m, Rotation error: {:.6f}rad".format(trans_dist_settled, rot_dist_settled))
                             break
+            
             rate.sleep()
+
+        # If tolerance was not reached before timeout, still report best-effort error
+        # from the current pose so downstream camera-trigger logging can print metrics.
+        if not success:
+            trans_final, rot_final = self.get_current_pose_full('/tool0_controller')
+            if trans_final and rot_final:
+                dx_error = trans_final[0] - x
+                dy_error = trans_final[1] - y
+                dz_error = trans_final[2] - z
+                trans_error = math.sqrt(dx_error**2 + dy_error**2 + dz_error**2)
+
+                qx_f, qy_f, qz_f, qw_f = rot_final[0], rot_final[1], rot_final[2], rot_final[3]
+                current_rx_f, current_ry_f, current_rz_f = self.quat_to_ur_axis_angle(qx_f, qy_f, qz_f, qw_f)
+                rot_error = self.rotation_distance(current_rx_f, current_ry_f, current_rz_f, rx, ry, rz)
         
-        return success
+        return success, (trans_error, rot_error, dx_error, dy_error, dz_error)
 def main():
     # Initialize ROS node VERY EARLY before argument parsing / logging
     rospy.init_node('move_to_xyz_node', anonymous=True)
@@ -226,12 +380,28 @@ def main():
     parser.add_argument("--rx", type=float, default=3.14, help="Orientation Rx (default: 3.14)")
     parser.add_argument("--ry", type=float, default=0.0, help="Orientation Ry (default: 0.0)")
     parser.add_argument("--rz", type=float, default=0.0, help="Orientation Rz (default: 0.0)")
+    parser.add_argument("--target-frame", type=str, default="camera",
+                        help="Frame of input target poses in CSV: tool0_controller or camera (default: camera)")
+    parser.add_argument("--error-frame", type=str, default="tool0_controller",
+                        help="TF frame for error evaluation (default: tool0_controller)")
+    parser.add_argument("--wait-timeout", type=float, default=60.0,
+                        help="Max seconds to wait for reaching pose tolerance (default: 60.0)")
     
     # Optional arguments for dynamics
     parser.add_argument("-a", "--acc", type=float, default=0.5, help="Joint acceleration")
     parser.add_argument("-v", "--vel", type=float, default=0.2, help="Joint velocity")
 
     args = parser.parse_args(rospy.myargv()[1:])
+    target_frame = args.target_frame if args.target_frame.startswith('/') else '/' + args.target_frame
+    error_frame = args.error_frame if args.error_frame.startswith('/') else '/' + args.error_frame
+
+    if target_frame == '/camera' and error_frame == '/tool0_controller':
+        error_frame = '/camera'
+        rospy.loginfo("Auto-setting error frame to /camera because target frame is /camera")
+
+    if target_frame not in ['/tool0_controller', '/camera']:
+        rospy.logerr("Invalid --target-frame '{}'. Use tool0_controller or camera.".format(args.target_frame))
+        return
 
     # Find the file either at the absolute path specified, or relative to the package dir
     csv_path = args.csv
@@ -306,7 +476,12 @@ def main():
     csv_file = open(csv_out_path, 'w')
     csv_writer = csv.writer(csv_file)
     # Header
-    csv_writer.writerow(['filename', 'x_mm', 'y_mm', 'z_mm', 'rx_rad', 'ry_rad', 'rz_rad', 'qx', 'qy', 'qz', 'qw'])
+    csv_writer.writerow([
+        'filename',
+        'camera_x_mm', 'camera_y_mm', 'camera_z_mm',
+        'camera_rx_rad', 'camera_ry_rad', 'camera_rz_rad',
+        'camera_qx', 'camera_qy', 'camera_qz', 'camera_qw'
+    ])
 
     # Publish markers (white spheres and optional dome)
     ur_control.publish_markers(targets, dome_params)
@@ -315,17 +490,35 @@ def main():
     ur_control.publish_poses(targets)
 
     for i, t in enumerate(targets):
+        target_for_motion = ur_control.convert_target_to_tool_pose(
+            t['x'], t['y'], t['z'], t['rx'], t['ry'], t['rz'], target_frame
+        )
+        if target_for_motion is None:
+            rospy.logwarn("Skipping point {}/{} due to TF conversion failure.".format(i+1, len(targets)))
+            continue
+
+        cmd_x, cmd_y, cmd_z, cmd_rx, cmd_ry, cmd_rz = target_for_motion
+
         rospy.loginfo("--- Moving to Point {}/{} ---".format(i+1, len(targets)))
-        rospy.loginfo("Target: X={}, Y={}, Z={}, Rx={}, Ry={}, Rz={}, a={}, v={}".format(
-            t['x'], t['y'], t['z'], t['rx'], t['ry'], t['rz'], t['a'], t['v']
+        rospy.loginfo("Target ({}) : X={}, Y={}, Z={}, Rx={}, Ry={}, Rz={}, a={}, v={}".format(
+            target_frame, t['x'], t['y'], t['z'], t['rx'], t['ry'], t['rz'], t['a'], t['v']
+        ))
+        rospy.loginfo("Commanded tool pose: X={}, Y={}, Z={}, Rx={}, Ry={}, Rz={}".format(
+            cmd_x, cmd_y, cmd_z, cmd_rx, cmd_ry, cmd_rz
         ))
         
         # Use movej for the first point to safely reach the dome, then movel to stay in the correct configuration
         is_first = (i == 0)
-        success = ur_control.move_and_wait(t['x'], t['y'], t['z'], t['rx'], t['ry'], t['rz'], t['a'], t['v'], is_first_point=is_first)
+        success, _ = ur_control.move_and_wait(
+            cmd_x, cmd_y, cmd_z, cmd_rx, cmd_ry, cmd_rz, t['a'], t['v'],
+            is_first_point=is_first, wait_timeout=args.wait_timeout
+        )
         
         if not rospy.is_shutdown():
-            rospy.loginfo("Reached position. Waiting 1 second before triggering camera...")
+            if success:
+                rospy.loginfo("Reached position. Waiting 1 second before triggering camera...")
+            else:
+                rospy.logwarn("Motion wait timeout before tolerance. Triggering camera with current pose/error values.")
             rospy.sleep(1.0)
             
             # Format time HH:MM:SS.sss
@@ -342,9 +535,28 @@ def main():
                 resp = trigger_service()
                 
                 if resp.success:
+                    # Print error information at camera trigger time using fresh TF data
+                    trigger_error_data = ur_control.compute_pose_errors(
+                        t['x'], t['y'], t['z'], t['rx'], t['ry'], t['rz'], error_frame
+                    )
+                    if trigger_error_data and all(v is not None for v in trigger_error_data):
+                        trans_error, rot_error, dx_error, dy_error, dz_error = [float(v) for v in trigger_error_data]
+                        print("\n" + "="*70)
+                        print("CAMERA TRIGGERED - Point {}/{}".format(i+1, len(targets)))
+                        print("="*70)
+                        print("Error Frame: {}".format(error_frame))
+                        print("Translational Error: {:.6f}m".format(trans_error))
+                        print("  dX: {:.6f}m, dY: {:.6f}m, dZ: {:.6f}m".format(
+                            dx_error, dy_error, dz_error))
+                        print("Rotational Error: {:.6f} rad ({:.4f} deg)".format(
+                            rot_error, math.degrees(rot_error)))
+                        print("="*70 + "\n")
+                    else:
+                        rospy.logwarn("Camera triggered but no valid numeric error data available for this point.")
+                    
                     rospy.loginfo("Camera triggered successfully. Image: " + img_filename)
-                    # Grab true current pose for CSV
-                    trans, rot = ur_control.get_current_pose_full()
+                    # Grab true current camera pose for CSV
+                    trans, rot = ur_control.get_current_pose_full('/camera')
                     if trans and rot:
                         x_mm, y_mm, z_mm = trans[0]*1000.0, trans[1]*1000.0, trans[2]*1000.0
                         qx, qy, qz, qw = rot[0], rot[1], rot[2], rot[3]

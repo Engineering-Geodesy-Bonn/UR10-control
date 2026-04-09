@@ -4,6 +4,7 @@
   <arg name="robot_ip" default="10.1.1.2"/>
   <arg name="limited" default="false"/>
   <arg name="start_rviz" default="true"/>
+  <arg name="camera_yaw" default="0.78539816339" doc="tool0->camera yaw in rad (45deg default)"/>
   
   <!-- RViz configuration that has both the arm and the camera -->
   <arg name="rviz_config" default="$(find ur_modern_driver)/config/ur_camera_visualization.rviz"/>
@@ -22,8 +23,9 @@
     <arg name="config_file" value="$(find pylon_trigger)/config/camera.yaml" />
   </include>
 
-  <!-- Static transform from tool0 to camera (10cm offset in Z direction) -->
-  <node pkg="tf" type="static_transform_publisher" name="camera_broadcaster" args="0 0 0.1 0 0 0 tool0 camera 100" />
+  <!-- Static transform from tool0 to camera (10cm Z offset, 45deg yaw by default) -->
+  <!-- Euler order for this node is yaw pitch roll -->
+  <node pkg="tf" type="static_transform_publisher" name="camera_broadcaster" args="0 0 0.1 $(arg camera_yaw) 0 0 tool0 camera 100" />
 
   <!-- Start the camera trigger node -->
   <node name="camera_trigger_node" pkg="pylon_trigger" type="trigger_camera.py" output="screen" />
