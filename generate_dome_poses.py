@@ -113,7 +113,7 @@ def quat2axisangle(x, y, z, w):
 
 def main():
     parser = argparse.ArgumentParser(description="Generate dome poses with orthogonal offset from sphere surface")
-    parser.add_argument("--offset", type=float, default=0.08,
+    parser.add_argument("--offset", type=float, default=0.12,
                         help="Orthogonal offset from sphere surface in meters (positive = outside, negative = inside)")
     parser.add_argument("--azimuth-step-deg", type=float, default=None,
                         help="Azimuth step in degrees for each latitude ring (overrides default ring resolution)")
